@@ -27,9 +27,10 @@ import datetime
 from datetime import date
 from datetime import datetime
 import pandas as pd
-
+from deepface import DeepFace
 
 prevname="NIL"
+name="NIL"
 
 roll1=0
 roll2=0
@@ -67,7 +68,6 @@ class FaceDetectionApp(QWidget):
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         self.face_detected = False
         self.photo_counter = 1  # Counter to keep track of captured photos
-        self. createncodings()
         self.initUI()
 
     def initUI(self):
@@ -106,9 +106,7 @@ class FaceDetectionApp(QWidget):
         self.attendanceButton.setChecked(False)
         self.attendanceButton.toggled.connect(self.toggleAttendance)
 
-        self.processButton = QPushButton('Process', self)
-        self.processButton.setFixedSize(100, 30)
-        self.processButton.clicked.connect(self.createncodings)
+  
 
         
 
@@ -119,7 +117,7 @@ class FaceDetectionApp(QWidget):
         button_layout.addWidget(self.stopButton)
         button_layout.addWidget(self.nameTextBox)
         button_layout.addWidget(self.snapButton)
-        button_layout.addWidget(self.processButton)
+        #button_layout.addWidget(self.processButton)
         button_layout.addWidget(self.attendanceButton)  # Add the attendance button
 
         main_layout = QVBoxLayout()  # Use QVBoxLayout for top alignment
@@ -134,63 +132,8 @@ class FaceDetectionApp(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.updateFrame)
 
-    def createncodings(self):
-        global data
- 
-        current_directory = os.getcwd()
-        folder_path = os.path.join(current_directory, 'facesfolder')
-
-        if os.path.exists(folder_path):
-            imagePaths = list(paths.list_images(folder_path))
-        else:
-            print(f"The directory '{folder_path}' does not exist in the current working directory.")
-
-
-        # initialize the list of known encodings and known names
-        knownEncodings = []
-        knownNames = []
-
-        # loop over the image paths
-        for (i, imagePath) in enumerate(imagePaths):
-            # extract the person name from the image path
-            print("[INFO] processing image {}/{}".format(i + 1,
-                len(imagePaths)))
-            name = imagePath.split(os.path.sep)[-2]
-            print(" NAME OF THE IMAGE ")
-            print(name)
+    
             
-
-            # load the input image and convert it from RGB (OpenCV ordering)
-            # to dlib ordering (RGB)
-            image = cv2.imread(imagePath)
-            rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-            # detect the (x, y)-coordinates of the bounding boxes
-            # corresponding to each face in the input image
-            boxes = face_recognition.face_locations(rgb,
-                model='hog')
-
-            # compute the facial embedding for the face
-            encodings = face_recognition.face_encodings(rgb, boxes)
-
-            # loop over the encodings
-            for encoding in encodings:
-                # add each encoding + name to our set of known names and
-                # encodings
-                knownEncodings.append(encoding)
-                knownNames.append(name)
-
-        # dump the facial encodings + names to disk
-        print("[INFO] serializing encodings...")
-        data = {"encodings": knownEncodings, "names": knownNames}
-        f = open('encodings.pickle', "wb")
-        f.write(pickle.dumps(data))
-        f.close()
-
-
-        print("[INFO] loading encodings + face detector...")
-        data = pickle.loads(open('encodings.pickle', "rb").read())
-
 
     def startCamera(self):
         if not self.camera.isOpened():
@@ -220,8 +163,9 @@ class FaceDetectionApp(QWidget):
             self.label.setText("TURN ON CAMERA")
 
     def updateFrame(self):
-        global atmode
+        global atmode,name
         global roll1,roll2,roll3,roll4,roll5,roll6,roll7,roll8,roll1status,roll2status,roll3status,roll4status,roll5status,roll6status,roll7status,roll8status
+        from deepface import DeepFace
         if self.face_detected and self.camera.isOpened():
             ret, frame = self.camera.read()
             if ret:
@@ -240,116 +184,100 @@ class FaceDetectionApp(QWidget):
                 elif atmode==1:
                     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    rects = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30),flags=cv2.CASCADE_SCALE_IMAGE)
+                    faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
 
-                    faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
+               
 
-                    boxes = [(y, x + w, y + h, x) for (x, y, w, h) in rects]
+                    if len(faces) > 0:
+                        for face in faces:
+                            (x, y, w, h) = face
+                            face_crop = frame[y:y + h, x:x + w]
+                            # if want to change the model , u can change in model_name
+                            res  = DeepFace.find(face_crop, db_path='Database/', enforce_detection=False, model_name='DeepFace')  # keep try and except it if no images 
+                            # res  = DeepFace.find(face_crop, db_path='Database/', enforce_detection=False, model_name='Facenet')
+                            if len(res[0]['identity'])>0:
+                                name = res[0]['identity'][0].split('/')
+                                name=name[1]
+                                
+                                xmin = int(res[0]['source_x'][0])
+                                ymin = int(res[0]['source_y'][0])
+                                w = res[0]['source_w'][0]
+                                h = res[0]['source_h'][0]
+                                xmax = int(xmin + w)
+                                ymax = int(ymin + h)
+                                
+                            else:
+                                name="Unknown"
 
-                    # compute the facial embeddings for each face bounding box
-                    encodings = face_recognition.face_encodings(rgb, boxes)
-                    names = []
-
-                     # loop over the facial embeddings
-                    for encoding in encodings:
-                        # attempt to match each face in the input image to our known
-                        # encodings
-                        matches = face_recognition.compare_faces(data["encodings"],
-                            encoding)
-                        name = "Unknown"
-
-
-                        # check to see if we have found a match
-                        if True in matches:
-                            # find the indexes of all matched faces then initialize a
-                            # dictionary to count the total number of times each face
-                            # was matched
-                            matchedIdxs = [i for (i, b) in enumerate(matches) if b]
-                            counts = {}
-
-                            # loop over the matched indexes and maintain a count for
-                            # each recognized face face
-                            for i in matchedIdxs:
-                                name = data["names"][i]
-                                counts[name] = counts.get(name, 0) + 1
-
-                            # determine the recognized face with the largest number
-                            # of votes (note: in the event of an unlikely tie Python
-                            # will select first entry in the dictionary)
-                            name = max(counts, key=counts.get)
-                        
-                        # update the list of names
-                        names.append(name)
-
-                    # loop over the recognized faces
-                    for ((top, right, bottom, left), name) in zip(boxes, names):
-                        # draw the predicted face name on the image
-                        #cv2.rectangle(frame, (left, top), (right, bottom),(0, 255, 0), 2)
-                        y = top - 15 if top - 15 > 15 else top + 15
-                        cv2.putText(frame, name, (left, y), cv2.FONT_HERSHEY_SIMPLEX,0.75, (0, 255, 0), 2)
-                        print(" RECOGNIZED ", name);
-                        if name=="1" and roll1==0:
-                            roll1=1
-                            roll1status="PRESENT"
-                            print("---- ROLL 1 ATTENDANCE TAKEN ---")
-                        elif name=="1" and roll1==1:
-                            print("### ROLL 1 ALREADY ATTENDANCE NOTED ### ")
-
-                        if name=="2" and roll2==0:
-                            roll2=1
-                            roll2status="PRESENT"
-                            print("---- ROLL 2 ATTENDANCE TAKEN ---")
-                        elif name=="2" and roll2==1:
-                            print("### ROLL 2 ALREADY ATTENDANCE NOTED ### ")
-
-                        if name=="3" and roll3==0:
-                            roll3=1
-                            roll3status="PRESENT"
-                            print("---- ROLL 3 ATTENDANCE TAKEN ---")
-                        elif name=="3" and roll3==1:
-                            print("### ROLL 3 ALREADY ATTENDANCE NOTED ### ")
-
-                        if name=="4" and roll4==0:
-                            roll4=1
-                            roll4status="PRESENT"
-                            print("---- ROLL 4 ATTENDANCE TAKEN ---")
-                        elif name=="4" and roll4==1:
-                            print("### ROLL 4 ALREADY ATTENDANCE NOTED ### ")    
-
-                        if name=="5" and roll5==0:
-                            roll5=1
-                            roll5status="PRESENT"
-                            print("---- ROLL 5 ATTENDANCE TAKEN ---")
-                        elif name=="5" and roll5==1:
-                            print("### ROLL 5 ALREADY ATTENDANCE NOTED ### ")
-
-                        if name=="6" and roll6==0:
-                            roll6=1
-                            roll6status="PRESENT"
-                            print("---- ROLL 6 ATTENDANCE TAKEN ---")
-                        elif name=="6" and roll6==1:
-                            print("### ROLL 6 ALREADY ATTENDANCE NOTED ### ")    
-
-                        if name=="7" and roll7==0:
-                            roll7=1
-                            roll7status="PRESENT"
-                            print("---- ROLL 7 ATTENDANCE TAKEN ---")
-                        elif name=="7" and roll7==1:
-                            print("### ROLL 7 ALREADY ATTENDANCE NOTED ### ") 
-
-
-                        if name=="8" and roll8==0:
-                            roll8=1
-                            roll8status="PRESENT"
-                            print("---- ROLL 8 ATTENDANCE TAKEN ---")
-                        elif name=="8" and roll8==1:
-                            print("### ROLL 8 ALREADY ATTENDANCE NOTED ### ")     
-
-
-
-
+                     
+                    print(name)
                     for (x, y, w, h) in faces:
                         cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+                        cv2.putText(frame, name, (x,y+25), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0),1,cv2.LINE_AA)
+                   
+                        
+                    print(" RECOGNIZED ", name)
+                    if name=="1" and roll1==0:
+                        roll1=1
+                        roll1status="PRESENT"
+                        print("---- ROLL 1 ATTENDANCE TAKEN ---")
+                    elif name=="1" and roll1==1:
+                        print("### ROLL 1 ALREADY ATTENDANCE NOTED ### ")
+
+                    if name=="2" and roll2==0:
+                        roll2=1
+                        roll2status="PRESENT"
+                        print("---- ROLL 2 ATTENDANCE TAKEN ---")
+                    elif name=="2" and roll2==1:
+                        print("### ROLL 2 ALREADY ATTENDANCE NOTED ### ")
+
+                    if name=="3" and roll3==0:
+                        roll3=1
+                        roll3status="PRESENT"
+                        print("---- ROLL 3 ATTENDANCE TAKEN ---")
+                    elif name=="3" and roll3==1:
+                        print("### ROLL 3 ALREADY ATTENDANCE NOTED ### ")
+
+                    if name=="4" and roll4==0:
+                        roll4=1
+                        roll4status="PRESENT"
+                        print("---- ROLL 4 ATTENDANCE TAKEN ---")
+                    elif name=="4" and roll4==1:
+                        print("### ROLL 4 ALREADY ATTENDANCE NOTED ### ")    
+
+                    if name=="5" and roll5==0:
+                        roll5=1
+                        roll5status="PRESENT"
+                        print("---- ROLL 5 ATTENDANCE TAKEN ---")
+                    elif name=="5" and roll5==1:
+                        print("### ROLL 5 ALREADY ATTENDANCE NOTED ### ")
+
+                    if name=="6" and roll6==0:
+                        roll6=1
+                        roll6status="PRESENT"
+                        print("---- ROLL 6 ATTENDANCE TAKEN ---")
+                    elif name=="6" and roll6==1:
+                        print("### ROLL 6 ALREADY ATTENDANCE NOTED ### ")    
+
+                    if name=="7" and roll7==0:
+                        roll7=1
+                        roll7status="PRESENT"
+                        print("---- ROLL 7 ATTENDANCE TAKEN ---")
+                    elif name=="7" and roll7==1:
+                        print("### ROLL 7 ALREADY ATTENDANCE NOTED ### ") 
+
+
+                    if name=="8" and roll8==0:
+                        roll8=1
+                        roll8status="PRESENT"
+                        print("---- ROLL 8 ATTENDANCE TAKEN ---")
+                    elif name=="8" and roll8==1:
+                        print("### ROLL 8 ALREADY ATTENDANCE NOTED ### ")     
+
+
+
+
+            
                     img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     h, w, ch = img.shape
                     bytesPerLine = ch * w
@@ -362,12 +290,12 @@ class FaceDetectionApp(QWidget):
     def capturePhotos(self):
         name = self.nameTextBox.text().strip()  # Get the name from the text box
         if name:
-            # Create the facesfolder if it does not exist
-            if not os.path.exists('facesfolder'):
-                os.makedirs('facesfolder')
+            # Create the Database if it does not exist
+            if not os.path.exists('Database'):
+                os.makedirs('Database')
 
-            # Create a folder for the person inside the facesfolder
-            person_folder = os.path.join('facesfolder', name)
+            # Create a folder for the person inside the Database
+            person_folder = os.path.join('Database', name)
             if not os.path.exists(person_folder):
                 os.makedirs(person_folder)
 
